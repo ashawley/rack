@@ -17,6 +17,8 @@ module Rack
     # The environment of the request.
     attr_reader :env
 
+    SCHEME_WHITELIST = %w(https http).freeze
+
     def initialize(env)
       @env = env
     end
@@ -72,10 +74,8 @@ module Rack
         'https'
       elsif @env['HTTP_X_FORWARDED_SSL'] == 'on'
         'https'
-      elsif @env['HTTP_X_FORWARDED_SCHEME']
-        @env['HTTP_X_FORWARDED_SCHEME']
-      elsif @env['HTTP_X_FORWARDED_PROTO']
-        @env['HTTP_X_FORWARDED_PROTO'].split(',')[0]
+      elsif forwarded_scheme
+        forwarded_scheme
       else
         @env["rack.url_scheme"]
       end
@@ -118,25 +118,25 @@ module Rack
 
     # Checks the HTTP request method (or verb) to see if it was of type DELETE
     def delete?;  request_method == "DELETE"  end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type GET
     def get?;     request_method == "GET"     end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type HEAD
     def head?;    request_method == "HEAD"    end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type OPTIONS
     def options?; request_method == "OPTIONS" end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type PATCH
     def patch?;   request_method == "PATCH"   end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type POST
     def post?;    request_method == "POST"    end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type PUT
     def put?;     request_method == "PUT"     end
-    
+
     # Checks the HTTP request method (or verb) to see if it was of type TRACE
     def trace?;   request_method == "TRACE"   end
 
@@ -260,8 +260,15 @@ module Rack
       #   the Cookie header such that those with more specific Path attributes
       #   precede those with less specific.  Ordering with respect to other
       #   attributes (e.g., Domain) is unspecified.
-      cookies = Utils.parse_query(string, ';,') { |s| Rack::Utils.unescape(s) rescue s }
-      cookies.each { |k,v| hash[k] = Array === v ? v.first : v }
+      (string || '').split(/[;,] */n).each do |cookie|
+        unless cookie.empty?
+          key, value = cookie.split('=', 2)
+          value = (Rack::Utils.unescape(value) rescue value)
+
+          hash[key] = value unless hash.key?(key)
+        end
+      end
+
       @env["rack.request.cookie_string"] = string
       hash
     end
@@ -313,7 +320,7 @@ module Rack
     def ip
       remote_addrs = @env['REMOTE_ADDR'] ? @env['REMOTE_ADDR'].split(/[,\s]+/) : []
       remote_addrs.reject! { |addr| trusted_proxy?(addr) }
-      
+
       return remote_addrs.first if remote_addrs.any?
 
       forwarded_ips = @env['HTTP_X_FORWARDED_FOR'] ? @env['HTTP_X_FORWARDED_FOR'].strip.split(/[,\s]+/) : []
@@ -335,5 +342,21 @@ module Rack
       def parse_multipart(env)
         Rack::Multipart.parse_multipart(env)
       end
+
+    private
+
+      def forwarded_scheme
+        scheme_headers = [
+          @env['HTTP_X_FORWARDED_SCHEME'],
+          @env['HTTP_X_FORWARDED_PROTO'].to_s.split(',')[0]
+        ]
+
+        scheme_headers.each do |header|
+          return header if SCHEME_WHITELIST.include?(header)
+        end
+
+        nil
+      end
+
   end
 end

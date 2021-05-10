@@ -386,6 +386,11 @@ describe Rack::Request do
     request.should.be.ssl?
   end
 
+  should "prevent scheme abuse" do
+    request = Rack::Request.new(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_SCHEME' => 'a."><script>alert(1)</script>'))
+    request.scheme.should.not.equal 'a."><script>alert(1)</script>'
+  end
+
   should "parse cookies" do
     req = Rack::Request.new \
       Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar;quux=h&m")
@@ -433,6 +438,26 @@ describe Rack::Request do
       '$Path'       => '"/acme"',
       'Part_Number' => '"Rocket_Launcher_0001"',
     })
+  end
+
+  # This has changed in newer Rack versions (sanity check for backports)
+  should "ignore empty cookie pairs" do
+    req = Rack::Request.new \
+      Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar;;quux=h&m")
+    req.cookies.should.equal "foo" => "bar", "quux" => "h&m"
+  end
+
+  # This has changed in newer Rack versions (sanity check for backports)
+  should "support a comma as cookie separator" do
+    req = Rack::Request.new \
+      Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar,quux=h&m")
+    req.cookies.should.equal "foo" => "bar", "quux" => "h&m"
+  end
+
+  should "disallow percent-encoded cookies to overwrite existing prefixed cookie names" do
+    req = Rack::Request.new \
+      Rack::MockRequest.env_for("", "HTTP_COOKIE" => "%66oo=baz;foo=bar")
+    req.cookies.should.equal "%66oo" => "baz", "foo" => "bar"
   end
 
   should "provide setters" do
